@@ -1,0 +1,78 @@
+model_config:
+
+  qlarifais:
+
+    dataset_name: ${datasets} # used to get answer vocabulary
+    cache_dir: ${env.cache_dir}
+    i_dim: 2048
+    q_dim: 768
+    g_dim: 300 # only used in classifier
+
+    losses:
+      #- type: cross_entropy, target dim needs to be adjusted
+      - type: logit_bce # binary cross-entropy loss since each question has multiple answers (MGFAN with ref.)
+
+    text_encoder:
+      type: any_transformer
+      params:
+        name: distilbert-base-uncased
+        dim: 768
+        num_hidden_layers: 12
+        num_attention_heads: 12
+
+
+    # models from grid-feats-vqa: https://github.com/facebookresearch/grid-feats-vqa
+    image_encoder:
+      type: grid_feats_vqa
+      params:
+        name: grid_feats_vqa
+        # specify backbone and type of features
+        model: R-50-grid.yaml # choices: [R-50-(grid or updn), X-101-grid, X-152-(grid or challenge(MoVie+GridFeat))]
+        output_dir: ${env.save_dir}
+      # how to resize features
+      resize: average_pooling
+      num_features: 49 # based on okvqa image dim, 224x224 and grid feats 32x32 sized stride (i.e. 224^2/32^2 = 7*7
+
+
+    # not using external knowledge as default
+    graph_encoder:
+      use: false # not used, only in classifier
+      type: numberbatch # [numberbatch, krisp]
+      g_dim: ${model_config.qlarifais.g_dim}
+      # downloaded from: <https://github.com/commonsense/conceptnet-numberbatch>
+      filepath: okvqa/defaults/graph/numberbatch-en.txt
+      max_seq_length: ${dataset_config.${datasets}.processors.text_processor.params.max_seq_length}
+
+
+    # not using attention as default
+    attention:
+      use: false
+
+
+    fusion:
+      type: two_modality_arithmetic
+      params:
+        operation: multiply
+        i_dim: ${model_config.qlarifais.i_dim} # image dim
+        q_dim: ${model_config.qlarifais.q_dim} # question dim
+        # todo: optimization parameters:
+        h_dim: 2048  # hidden dim as input in classifier
+        norm: weight # [weight, batch, layer, none]
+        act: ReLU # activation function
+        dropout: 0 # avoid overfitting
+
+
+    classifier:
+      type: simple
+      params:
+        # input dim is the output of the fusion module
+        in_dim: ${model_config.qlarifais.fusion.params.h_dim}
+        out_dim: 2250 # target size for okvqa (okvqa v1.1 has 2250) todo: autoindex_in_node??
+        # todo: optimization parameters:
+        h_dim: 2550 # mean of input and output
+        num_non_linear_layers: 2 #
+        norm: weight # [weight, batch, layer, none]
+        act: ReLU # activation function
+        dropout: 0.4 # avoid overfitting, or keep all information?
+
+
